@@ -36,6 +36,10 @@ public class DefaultController {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
+    // Эти значения можно вынести в конфигурацию
+    private static final String USER_AGENT = "CustomSearchBot";
+    private static final String REFERRER = "http://www.google.com";
+
     @GetMapping("/startIndexing")
     public ResponseEntity<Map<String, Object>> startIndexing() {
         if (isIndexingInProgress.get()) {
@@ -48,11 +52,7 @@ public class DefaultController {
         activePools.add(pool);
 
         try {
-            pool.submit(() -> {
-                performFullIndexing();
-                return null;
-            }).get();
-
+            pool.submit(this::performFullIndexing).get();
             return ResponseEntity.ok(createSuccessResponse());
         } catch (Exception e) {
             logger.error("Ошибка при запуске индексации", e);
@@ -60,14 +60,7 @@ public class DefaultController {
         } finally {
             pool.shutdown();
             activePools.remove(pool);
-            try {
-                if (!pool.awaitTermination(60, TimeUnit.SECONDS)) {
-                    pool.shutdownNow();
-                }
-            } catch (InterruptedException e) {
-                logger.error("Ошибка при завершении ForkJoinPool", e);
-                pool.shutdownNow();
-            }
+            awaitTermination(pool);
             isIndexingInProgress.set(false);
         }
     }
@@ -80,26 +73,12 @@ public class DefaultController {
         }
 
         isIndexingInProgress.set(false);
-
-        for (ForkJoinPool pool : activePools) {
-            pool.shutdownNow();
-        }
+        activePools.forEach(ForkJoinPool::shutdownNow);
         activePools.clear();
-
-        for (String site : sites) {
-            String currentStatus = getSiteStatus(site);
-            if ("INDEXING".equals(currentStatus)) {
-                updateSiteStatus(site, "FAILED", "Индексация остановлена пользователем");
-            }
-        }
+        sites.forEach(site -> updateSiteStatus(site, "FAILED", "Индексация остановлена пользователем"));
 
         logger.info("Индексация успешно остановлена");
         return ResponseEntity.ok(createSuccessResponse());
-    }
-
-    private String getSiteStatus(String siteUrl) {
-        String sql = "SELECT status FROM site WHERE url = ?";
-        return jdbcTemplate.queryForObject(sql, String.class, siteUrl);
     }
 
     private void performFullIndexing() {
@@ -111,9 +90,7 @@ public class DefaultController {
 
             try {
                 logger.info("Индексация сайта: {}", site);
-
                 deleteExistingSiteData(site);
-
                 updateSiteStatus(site, "INDEXING", null);
 
                 ForkJoinPool pool = new ForkJoinPool();
@@ -168,8 +145,8 @@ public class DefaultController {
                 }
 
                 Document doc = Jsoup.connect(pageUrl)
-                        .userAgent("CustomSearchBot")
-                        .referrer("http://www.google.com")
+                        .userAgent(USER_AGENT)
+                        .referrer(REFERRER)
                         .get();
 
                 savePageToDatabase(siteUrl, pageUrl, doc.html());
@@ -204,6 +181,17 @@ public class DefaultController {
             String sql = "SELECT COUNT(*) FROM page WHERE url = ?";
             Integer count = jdbcTemplate.queryForObject(sql, Integer.class, pageUrl);
             return count != null && count > 0;
+        }
+    }
+
+    private void awaitTermination(ForkJoinPool pool) {
+        try {
+            if (!pool.awaitTermination(60, TimeUnit.SECONDS)) {
+                pool.shutdownNow();
+            }
+        } catch (InterruptedException e) {
+            logger.error("Ошибка при завершении ForkJoinPool", e);
+            pool.shutdownNow();
         }
     }
 
