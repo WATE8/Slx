@@ -3,6 +3,8 @@ package searchengine.controllers;
 import org.jsoup.Jsoup;
 import org.jsoup.nodes.Document;
 import org.jsoup.select.Elements;
+import org.slf4j.Logger;
+import org.slf4j.LoggerFactory;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.jdbc.core.JdbcTemplate;
@@ -11,13 +13,10 @@ import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
 
 import java.io.IOException;
-import java.net.URI;
-import java.net.http.HttpClient;
-import java.net.http.HttpRequest;
-import java.net.http.HttpResponse;
-import java.util.HashMap;
-import java.util.List;
-import java.util.Map;
+import java.util.*;
+import java.util.concurrent.ForkJoinPool;
+import java.util.concurrent.RecursiveTask;
+import java.util.concurrent.TimeUnit;
 import java.util.concurrent.atomic.AtomicBoolean;
 
 @RestController
@@ -25,6 +24,8 @@ import java.util.concurrent.atomic.AtomicBoolean;
 public class DefaultController {
 
     private final AtomicBoolean isIndexingInProgress = new AtomicBoolean(false);
+    private final List<ForkJoinPool> activePools = Collections.synchronizedList(new ArrayList<>());
+    private static final Logger logger = LoggerFactory.getLogger(DefaultController.class);
 
     private final List<String> sites = List.of(
             "https://example.com",
@@ -32,92 +33,186 @@ public class DefaultController {
             "https://example.net"
     );
 
-    private final HttpClient client = HttpClient.newHttpClient();
-
     @Autowired
     private JdbcTemplate jdbcTemplate;
-
-    @RequestMapping("/")
-    public String index() {
-        return "index";
-    }
 
     @GetMapping("/startIndexing")
     public ResponseEntity<Map<String, Object>> startIndexing() {
         if (isIndexingInProgress.get()) {
+            logger.warn("Индексация уже запущена");
             return ResponseEntity.badRequest().body(createErrorResponse("Индексация уже запущена"));
         }
 
         isIndexingInProgress.set(true);
+        ForkJoinPool pool = new ForkJoinPool();
+        activePools.add(pool);
+
         try {
-            performFullIndexing();
+            pool.submit(() -> {
+                performFullIndexing();
+                return null;
+            }).get(); // Запускаем индексацию и блокируемся до завершения
+
             return ResponseEntity.ok(createSuccessResponse());
         } catch (Exception e) {
+            logger.error("Ошибка при запуске индексации", e);
             return ResponseEntity.status(500).body(createErrorResponse("Ошибка при запуске индексации: " + e.getMessage()));
         } finally {
+            pool.shutdown();
+            activePools.remove(pool); // Удаляем из списка активных пулов
+            try {
+                if (!pool.awaitTermination(60, TimeUnit.SECONDS)) {
+                    pool.shutdownNow(); // Принудительное завершение, если не удалось корректно завершить в течение 60 секунд
+                }
+            } catch (InterruptedException e) {
+                logger.error("Ошибка при завершении ForkJoinPool", e);
+                pool.shutdownNow();
+            }
             isIndexingInProgress.set(false);
         }
     }
 
-    private void performFullIndexing() {
-        System.out.println("Запуск индексации сайтов...");
+    @GetMapping("/stopIndexing")
+    public ResponseEntity<Map<String, Object>> stopIndexing() {
+        if (!isIndexingInProgress.get()) {
+            logger.warn("Попытка остановить индексацию, которая не запущена");
+            return ResponseEntity.badRequest().body(createErrorResponse("Индексация не запущена"));
+        }
 
+        // Остановка индексации
+        isIndexingInProgress.set(false);
+
+        // Принудительно останавливаем все активные потоки
+        for (ForkJoinPool pool : activePools) {
+            pool.shutdownNow();
+        }
+        activePools.clear();
+
+        // Обновление статусов только для сайтов, которые сейчас в состоянии INDEXING
         for (String site : sites) {
-            try {
-                System.out.println("Индексация сайта: " + site);
-
-                String content = fetchSiteContent(site);
-                processAndIndexContent(site, content);
-
-                System.out.println("Индексация сайта завершена: " + site);
-            } catch (Exception e) {
-                System.err.println("Ошибка при индексации сайта: " + site + " - " + e.getMessage());
+            String currentStatus = getSiteStatus(site);
+            if ("INDEXING".equals(currentStatus)) {
+                updateSiteStatus(site, "FAILED", "Индексация остановлена пользователем");
             }
         }
 
-        System.out.println("Индексация всех сайтов завершена.");
+        logger.info("Индексация успешно остановлена");
+        return ResponseEntity.ok(createSuccessResponse());
     }
 
-    private String fetchSiteContent(String siteUrl) throws IOException, InterruptedException {
-        HttpRequest request = HttpRequest.newBuilder()
-                .uri(URI.create(siteUrl))
-                .build();
+    // Обновленный метод с использованием актуальной версии JdbcTemplate.queryForObject
+    private String getSiteStatus(String siteUrl) {
+        String sql = "SELECT status FROM site WHERE url = ?";
+        return jdbcTemplate.queryForObject(sql, String.class, siteUrl); // Использование нового метода
+    }
 
-        HttpResponse<String> response;
-        try {
-            response = client.send(request, HttpResponse.BodyHandlers.ofString());
-        } catch (InterruptedException e) {
-            Thread.currentThread().interrupt();
-            throw new InterruptedException("Запрос был прерван при загрузке сайта: " + siteUrl);
-        }
+    private void performFullIndexing() {
+        for (String site : sites) {
+            if (!isIndexingInProgress.get()) {
+                logger.info("Индексация остановлена перед обработкой сайта: {}", site);
+                break;
+            }
 
-        if (response.statusCode() == 200) {
-            return response.body();  // Возвращаем содержимое страницы
-        } else {
-            throw new IOException("Ошибка при загрузке сайта: " + siteUrl + ", код ответа: " + response.statusCode());
+            try {
+                logger.info("Индексация сайта: {}", site);
+
+                // Удаляем существующие данные по сайту
+                deleteExistingSiteData(site);
+
+                // Устанавливаем статус "INDEXING"
+                updateSiteStatus(site, "INDEXING", null);
+
+                // Инициируем процесс индексации страниц
+                ForkJoinPool pool = new ForkJoinPool();
+                activePools.add(pool);
+                try {
+                    pool.invoke(new PageCrawler(site, site));
+                } finally {
+                    pool.shutdown();
+                    activePools.remove(pool);
+                }
+
+                // По завершению индексации устанавливаем статус "INDEXED"
+                updateSiteStatus(site, "INDEXED", null);
+                logger.info("Индексация сайта завершена: {}", site);
+            } catch (Exception e) {
+                updateSiteStatus(site, "FAILED", e.getMessage());
+                logger.error("Ошибка при индексации сайта: {}", site, e);
+            }
         }
     }
 
-    private void processAndIndexContent(String siteUrl, String content) {
-        try {
-            Document doc = Jsoup.parse(content);
-            String title = doc.title(); // Извлекаем заголовок страницы
-            Elements paragraphs = doc.select("p"); // Извлекаем все абзацы страницы
-
-            System.out.println("Заголовок: " + title);
-            System.out.println("Текст страницы:");
-            paragraphs.forEach(paragraph -> System.out.println(paragraph.text()));
-
-            savePageToDatabase(siteUrl, title, content);
-
-        } catch (Exception e) {
-            System.err.println("Ошибка при обработке контента сайта: " + siteUrl + " - " + e.getMessage());
-        }
+    private void deleteExistingSiteData(String siteUrl) {
+        jdbcTemplate.update("DELETE FROM page WHERE site_url = ?", siteUrl);
+        jdbcTemplate.update("DELETE FROM site WHERE url = ?", siteUrl);
     }
 
-    private void savePageToDatabase(String siteUrl, String title, String content) {
-        String sql = "INSERT INTO pages (site_url, title, content) VALUES (?, ?, ?)";
-        jdbcTemplate.update(sql, siteUrl, title, content); // Используем JdbcTemplate для сохранения
+    private void updateSiteStatus(String siteUrl, String status, String error) {
+        String sql = "UPDATE site SET status = ?, status_time = NOW(), last_error = ? WHERE url = ?";
+        jdbcTemplate.update(sql, status, error, siteUrl);
+    }
+
+    private void savePageToDatabase(String siteUrl, String pageUrl, String content) {
+        String sql = "INSERT INTO page (site_url, url, content) VALUES (?, ?, ?)";
+        jdbcTemplate.update(sql, siteUrl, pageUrl, content);
+    }
+
+    private class PageCrawler extends RecursiveTask<Void> {
+        private final String siteUrl;
+        private final String pageUrl;
+
+        public PageCrawler(String siteUrl, String pageUrl) {
+            this.siteUrl = siteUrl;
+            this.pageUrl = pageUrl;
+        }
+
+        @Override
+        protected Void compute() {
+            try {
+                if (!isIndexingInProgress.get()) {
+                    logger.info("Индексация остановлена пользователем для сайта: {}", siteUrl);
+                    updateSiteStatus(siteUrl, "FAILED", "Индексация остановлена пользователем");
+                    return null;
+                }
+
+                Document doc = Jsoup.connect(pageUrl)
+                        .userAgent("CustomSearchBot")
+                        .referrer("http://www.google.com")
+                        .get();
+
+                savePageToDatabase(siteUrl, pageUrl, doc.html());
+
+                Thread.sleep(500 + new Random().nextInt(4500));
+
+                Elements links = doc.select("a[href]");
+                List<PageCrawler> tasks = new ArrayList<>();
+
+                for (var link : links) {
+                    String nextUrl = link.absUrl("href");
+                    if (!isPageIndexed(nextUrl)) {
+                        PageCrawler task = new PageCrawler(siteUrl, nextUrl);
+                        tasks.add(task);
+                        task.fork();
+                    }
+                }
+
+                for (PageCrawler task : tasks) {
+                    task.join();
+                }
+
+            } catch (IOException | InterruptedException e) {
+                logger.error("Ошибка при индексации страницы: {}", pageUrl, e);
+                updateSiteStatus(siteUrl, "FAILED", "Ошибка при обработке страницы: " + pageUrl);
+                Thread.currentThread().interrupt();
+            }
+            return null;
+        }
+
+        private boolean isPageIndexed(String pageUrl) {
+            String sql = "SELECT COUNT(*) FROM page WHERE url = ?";
+            Integer count = jdbcTemplate.queryForObject(sql, Integer.class, pageUrl);
+            return count != null && count > 0;
+        }
     }
 
     private Map<String, Object> createSuccessResponse() {
