@@ -51,7 +51,7 @@ public class DefaultController {
             pool.submit(() -> {
                 performFullIndexing();
                 return null;
-            }).get(); // Запускаем индексацию и блокируемся до завершения
+            }).get();
 
             return ResponseEntity.ok(createSuccessResponse());
         } catch (Exception e) {
@@ -59,10 +59,10 @@ public class DefaultController {
             return ResponseEntity.status(500).body(createErrorResponse("Ошибка при запуске индексации: " + e.getMessage()));
         } finally {
             pool.shutdown();
-            activePools.remove(pool); // Удаляем из списка активных пулов
+            activePools.remove(pool);
             try {
                 if (!pool.awaitTermination(60, TimeUnit.SECONDS)) {
-                    pool.shutdownNow(); // Принудительное завершение, если не удалось корректно завершить в течение 60 секунд
+                    pool.shutdownNow();
                 }
             } catch (InterruptedException e) {
                 logger.error("Ошибка при завершении ForkJoinPool", e);
@@ -79,16 +79,13 @@ public class DefaultController {
             return ResponseEntity.badRequest().body(createErrorResponse("Индексация не запущена"));
         }
 
-        // Остановка индексации
         isIndexingInProgress.set(false);
 
-        // Принудительно останавливаем все активные потоки
         for (ForkJoinPool pool : activePools) {
             pool.shutdownNow();
         }
         activePools.clear();
 
-        // Обновление статусов только для сайтов, которые сейчас в состоянии INDEXING
         for (String site : sites) {
             String currentStatus = getSiteStatus(site);
             if ("INDEXING".equals(currentStatus)) {
@@ -100,10 +97,9 @@ public class DefaultController {
         return ResponseEntity.ok(createSuccessResponse());
     }
 
-    // Обновленный метод с использованием актуальной версии JdbcTemplate.queryForObject
     private String getSiteStatus(String siteUrl) {
         String sql = "SELECT status FROM site WHERE url = ?";
-        return jdbcTemplate.queryForObject(sql, String.class, siteUrl); // Использование нового метода
+        return jdbcTemplate.queryForObject(sql, String.class, siteUrl);
     }
 
     private void performFullIndexing() {
@@ -116,13 +112,10 @@ public class DefaultController {
             try {
                 logger.info("Индексация сайта: {}", site);
 
-                // Удаляем существующие данные по сайту
                 deleteExistingSiteData(site);
 
-                // Устанавливаем статус "INDEXING"
                 updateSiteStatus(site, "INDEXING", null);
 
-                // Инициируем процесс индексации страниц
                 ForkJoinPool pool = new ForkJoinPool();
                 activePools.add(pool);
                 try {
@@ -132,7 +125,6 @@ public class DefaultController {
                     activePools.remove(pool);
                 }
 
-                // По завершению индексации устанавливаем статус "INDEXED"
                 updateSiteStatus(site, "INDEXED", null);
                 logger.info("Индексация сайта завершена: {}", site);
             } catch (Exception e) {
