@@ -13,6 +13,7 @@
         <maven.compiler.target>21</maven.compiler.target>
         <mysql-connector-java.version>8.0.33</mysql-connector-java.version>
         <lombok.version>1.18.30</lombok.version>
+        <jsoup.version>1.16.1</jsoup.version>
     </properties>
 
     <parent>
@@ -41,12 +42,23 @@
             <artifactId>spring-boot-starter-thymeleaf</artifactId>
         </dependency>
 
+        <dependency>
+            <groupId>org.jsoup</groupId>
+            <artifactId>jsoup</artifactId>
+            <version>${jsoup.version}</version> <!-- Убедитесь, что используете актуальную версию -->
+        </dependency>
+
         <!-- Lombok -->
         <dependency>
             <groupId>org.projectlombok</groupId>
             <artifactId>lombok</artifactId>
             <version>${lombok.version}</version> <!-- Указание версии Lombok -->
             <scope>provided</scope>
+        </dependency>
+
+        <dependency>
+            <groupId>org.springframework.boot</groupId>
+            <artifactId>spring-boot-starter-jdbc</artifactId>
         </dependency>
 
         <!-- Spring Data JPA -->
