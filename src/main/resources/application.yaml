@@ -16,9 +16,23 @@ spring:
 
 indexing-settings:
   sites:
-    - url: https://www.lenta.ru
-      name: Лента.ру
-    - url: https://www.skillbox.ru
-      name: Skillbox
-    - url: https://www.playback.ru
-      name: PlayBack.Ru
+    - url: "http://www.playback.ru"
+      name: "Playback"
+    - url: "https://volochek.life"
+      name: "Volochek Life"
+    - url: "http://radiomv.ru"
+      name: "Radio MV"
+    - url: "https://ipfran.ru"
+      name: "IPFRAN"
+    - url: "https://dimonvideo.ru"
+      name: "DimonVideo"
+    - url: "https://nikoartgallery.com"
+      name: "Niko Art Gallery"
+    - url: "https://et-cetera.ru/mobile/"
+      name: "Et Cetera Mobile"
+    - url: "https://www.lutherancathedral.ru"
+      name: "Lutheran Cathedral"
+    - url: "https://dombulgakova.ru"
+      name: "Dom Bulgakova"
+    - url: "https://www.svetlovka.ru"
+      name: "Svetlovka"

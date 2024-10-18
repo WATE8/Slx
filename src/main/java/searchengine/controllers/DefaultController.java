@@ -11,6 +11,7 @@ import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.web.bind.annotation.GetMapping;
 import org.springframework.web.bind.annotation.RequestMapping;
 import org.springframework.web.bind.annotation.RestController;
+import searchengine.model.Status;
 
 import java.io.IOException;
 import java.util.*;
@@ -36,7 +37,6 @@ public class DefaultController {
     @Autowired
     private JdbcTemplate jdbcTemplate;
 
-    // Эти значения можно вынести в конфигурацию
     private static final String USER_AGENT = "CustomSearchBot";
     private static final String REFERRER = "http://www.google.com";
 
@@ -75,7 +75,7 @@ public class DefaultController {
         isIndexingInProgress.set(false);
         activePools.forEach(ForkJoinPool::shutdownNow);
         activePools.clear();
-        sites.forEach(site -> updateSiteStatus(site, "FAILED", "Индексация остановлена пользователем"));
+        sites.forEach(site -> updateSiteStatus(site, Status.FAILED, "Индексация остановлена пользователем"));
 
         logger.info("Индексация успешно остановлена");
         return ResponseEntity.ok(createSuccessResponse());
@@ -91,7 +91,7 @@ public class DefaultController {
             try {
                 logger.info("Индексация сайта: {}", site);
                 deleteExistingSiteData(site);
-                updateSiteStatus(site, "INDEXING", null);
+                updateSiteStatus(site, Status.INDEXING, null);
 
                 ForkJoinPool pool = new ForkJoinPool();
                 activePools.add(pool);
@@ -102,10 +102,10 @@ public class DefaultController {
                     activePools.remove(pool);
                 }
 
-                updateSiteStatus(site, "INDEXED", null);
+                updateSiteStatus(site, Status.INDEXED, null);
                 logger.info("Индексация сайта завершена: {}", site);
             } catch (Exception e) {
-                updateSiteStatus(site, "FAILED", e.getMessage());
+                updateSiteStatus(site, Status.FAILED, e.getMessage());
                 logger.error("Ошибка при индексации сайта: {}", site, e);
             }
         }
@@ -116,9 +116,9 @@ public class DefaultController {
         jdbcTemplate.update("DELETE FROM site WHERE url = ?", siteUrl);
     }
 
-    private void updateSiteStatus(String siteUrl, String status, String error) {
+    private void updateSiteStatus(String siteUrl, Status status, String error) {
         String sql = "UPDATE site SET status = ?, status_time = NOW(), last_error = ? WHERE url = ?";
-        jdbcTemplate.update(sql, status, error, siteUrl);
+        jdbcTemplate.update(sql, status.name(), error, siteUrl);
     }
 
     private void savePageToDatabase(String siteUrl, String pageUrl, String content) {
@@ -140,7 +140,7 @@ public class DefaultController {
             try {
                 if (!isIndexingInProgress.get()) {
                     logger.info("Индексация остановлена пользователем для сайта: {}", siteUrl);
-                    updateSiteStatus(siteUrl, "FAILED", "Индексация остановлена пользователем");
+                    updateSiteStatus(siteUrl, Status.FAILED, "Индексация остановлена пользователем");
                     return null;
                 }
 
@@ -171,7 +171,7 @@ public class DefaultController {
 
             } catch (IOException | InterruptedException e) {
                 logger.error("Ошибка при индексации страницы: {}", pageUrl, e);
-                updateSiteStatus(siteUrl, "FAILED", "Ошибка при обработке страницы: " + pageUrl);
+                updateSiteStatus(siteUrl, Status.FAILED, "Ошибка при обработке страницы: " + pageUrl);
                 Thread.currentThread().interrupt();
             }
             return null;
