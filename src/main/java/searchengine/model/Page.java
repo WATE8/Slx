@@ -5,7 +5,7 @@ import lombok.Getter;
 import lombok.Setter;
 
 @Entity
-@Table(name = "page", indexes = @Index(name = "idx_path", columnList = "path"))
+@Table(name = "page", indexes = {@jakarta.persistence.Index(name = "idx_path", columnList = "path")})
 @Getter
 @Setter
 public class Page {
