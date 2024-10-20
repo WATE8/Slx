@@ -19,6 +19,7 @@
         <english.version>1.5</english.version>
         <dictionary-reader.version>1.5</dictionary-reader.version>
         <russian.version>1.5</russian.version>
+        <lucene-analyzers-common.version>8.11.2</lucene-analyzers-common.version>
     </properties>
 
     <parent>
@@ -30,7 +31,7 @@
 
     <repositories>
         <repository>
-            <id>skillbox-gitlab</id>
+            <id>skill box-gitlab</id>
             <url>https://gitlab.skillbox.ru/api/v4/projects/263574/packages/maven</url>
         </repository>
     </repositories>
@@ -77,6 +78,12 @@
         <dependency>
             <groupId>org.springframework.boot</groupId>
             <artifactId>spring-boot-starter-data-jpa</artifactId>
+        </dependency>
+
+        <dependency>
+            <groupId>org.apache.lucene</groupId>
+            <artifactId>lucene-analyzers-common</artifactId>
+            <version>${lucene-analyzers-common.version}</version> <!-- Проверьте последнюю версию -->
         </dependency>
 
         <!-- MySQL Connector -->
