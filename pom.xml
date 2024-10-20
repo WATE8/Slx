@@ -14,6 +14,11 @@
         <mysql-connector-java.version>8.0.33</mysql-connector-java.version>
         <lombok.version>1.18.30</lombok.version>
         <jsoup.version>1.16.1</jsoup.version>
+        <morph.version>1.5</morph.version>
+        <morphology.version>1.5</morphology.version>
+        <english.version>1.5</english.version>
+        <dictionary-reader.version>1.5</dictionary-reader.version>
+        <russian.version>1.5</russian.version>
     </properties>
 
     <parent>
@@ -22,6 +27,13 @@
         <version>3.3.3</version> <!-- Обновление версии Spring Boot -->
         <relativePath/>
     </parent>
+
+    <repositories>
+        <repository>
+            <id>skillbox-gitlab</id>
+            <url>https://gitlab.skillbox.ru/api/v4/projects/263574/packages/maven</url>
+        </repository>
+    </repositories>
 
     <dependencies>
         <!-- Spring Boot Web -->
@@ -73,6 +85,33 @@
             <artifactId>mysql-connector-java</artifactId>
             <version>${mysql-connector-java.version}</version> <!-- Указание версии MySQL Connector -->
             <scope>runtime</scope>
+        </dependency>
+
+        <!-- Lucene Morphology Libraries -->
+        <dependency>
+            <groupId>org.apache.lucene.morphology</groupId>
+            <artifactId>morph</artifactId>
+            <version>${morph.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.lucene.analysis</groupId>
+            <artifactId>morphology</artifactId>
+            <version>${morphology.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.lucene.morphology</groupId>
+            <artifactId>dictionary-reader</artifactId>
+            <version>${dictionary-reader.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.lucene.morphology</groupId>
+            <artifactId>english</artifactId>
+            <version>${english.version}</version>
+        </dependency>
+        <dependency>
+            <groupId>org.apache.lucene.morphology</groupId>
+            <artifactId>russian</artifactId>
+            <version>${russian.version}</version>
         </dependency>
     </dependencies>
 
