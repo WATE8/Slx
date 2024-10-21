@@ -3,6 +3,7 @@ package searchengine;
 import org.apache.lucene.morphology.LuceneMorphology;
 import org.apache.lucene.morphology.russian.RussianLuceneMorphology;
 
+import org.springframework.stereotype.Component;
 import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.net.URL;
@@ -11,6 +12,8 @@ import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
+
+@Component
 public class TextProcessor {
 
     private static final Logger logger = Logger.getLogger(TextProcessor.class.getName());
@@ -149,7 +152,7 @@ public class TextProcessor {
             String cleanedText = processor.removeHtmlTags(htmlText);
             System.out.println("Текст без HTML-тегов: " + cleanedText);
 
-            String url = "http://example.com/page";
+            String url = "http://www.playback.ru";
             Map<String, Object> indexResponse = processor.indexPage(url);
             System.out.println("Индексация страницы: " + indexResponse);
         } catch (Exception e) {
