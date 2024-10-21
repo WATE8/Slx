@@ -3,6 +3,9 @@ package searchengine;
 import org.apache.lucene.morphology.LuceneMorphology;
 import org.apache.lucene.morphology.russian.RussianLuceneMorphology;
 
+import java.io.IOException;
+import java.net.HttpURLConnection;
+import java.net.URL;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
@@ -95,11 +98,40 @@ public class TextProcessor {
             return response;
         }
 
-        response.put("result", true);
+        try {
+            String pageContent = fetchPageContent(url);
+            Map<String, Integer> lemmasCount = getLemmas(pageContent);
+
+            // Здесь вы можете добавить код для сохранения лемм в индекс
+
+            response.put("result", true);
+            response.put("lemmasCount", lemmasCount);
+        } catch (IOException e) {
+            logger.log(Level.SEVERE, "Ошибка при загрузке содержимого страницы: " + url, e);
+            response.put("result", false);
+            response.put("error", "Не удалось загрузить содержимое страницы");
+        }
+
         return response;
     }
 
-    private boolean isValidUrl(String url) {
+    private String fetchPageContent(String urlString) throws IOException {
+        URL url = new URL(urlString);
+        HttpURLConnection connection = (HttpURLConnection) url.openConnection();
+        connection.setRequestMethod("GET");
+        connection.connect();
+
+        if (connection.getResponseCode() != 200) {
+            throw new IOException("Ошибка при получении страницы, код ответа: " + connection.getResponseCode());
+        }
+
+        try (Scanner scanner = new Scanner(connection.getInputStream())) {
+            scanner.useDelimiter("\\A"); // Считываем весь контент
+            return scanner.hasNext() ? scanner.next() : "";
+        }
+    }
+
+    public boolean isValidUrl(String url) {
         return allowedDomains.stream().anyMatch(url::contains);
     }
 
