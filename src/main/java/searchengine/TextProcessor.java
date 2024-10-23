@@ -236,10 +236,10 @@ public class TextProcessor {
                 "https://volochek.life",
                 "http://www.playback.ru",
                 "https://www.svetlovka.ru",
-                "https://dimonvideo.ru",
-                "https://ipfran.ru",
-                "https://nikoartgallery.com",
                 "https://et-cetera.ru/mobile/",
+                "https://nikoartgallery.com",
+                "https://ipfran.ru",
+                "https://dimonvideo.ru",
                 "http://radiomv.ru"
         };
 
