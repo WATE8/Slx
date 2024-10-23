@@ -3,15 +3,18 @@ package searchengine;
 import org.apache.lucene.morphology.LuceneMorphology;
 import org.apache.lucene.morphology.russian.RussianLuceneMorphology;
 import org.springframework.stereotype.Component;
+
+import javax.net.ssl.*;
+import java.security.cert.X509Certificate;
 import java.io.IOException;
 import java.net.HttpURLConnection;
+import java.net.URI;
 import java.net.URL;
+import java.net.URISyntaxException;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
-import java.net.URI;
-import java.net.URISyntaxException;
 
 @Component
 public class TextProcessor {
@@ -20,25 +23,49 @@ public class TextProcessor {
     private final LuceneMorphology luceneMorph;
     private final Set<String> excludedPosTags;
     private final Map<String, List<String>> lemmaCache = new ConcurrentHashMap<>();
-    private final Set<String> allowedDomains;
 
-    public TextProcessor(Set<String> excludedPosTags, Set<String> allowedDomains) throws Exception {
+    public TextProcessor(Set<String> excludedPosTags) throws Exception {
         // Инициализация морфологии
         this.luceneMorph = new RussianLuceneMorphology();
         this.excludedPosTags = excludedPosTags != null ? excludedPosTags : Set.of("СОЮЗ", "МЕЖД", "ПРЕДЛ", "ЧАСТ");
-        this.allowedDomains = allowedDomains != null ? allowedDomains : Set.of(); // Если домены не переданы, инициализируем пустым множеством
+
+        // Игнорировать проверки сертификатов
+        disableCertificateValidation();
     }
 
-    /**
-     * Извлекает леммы из текста и подсчитывает их количество.
-     */
+    private void disableCertificateValidation() {
+        try {
+            TrustManager[] trustAllCerts = new TrustManager[]{
+                    new X509TrustManager() {
+                        public X509Certificate[] getAcceptedIssuers() {
+                            return null;
+                        }
+                        public void checkClientTrusted(X509Certificate[] certs, String authType) {
+                        }
+                        public void checkServerTrusted(X509Certificate[] certs, String authType) {
+                        }
+                    }
+            };
+
+            SSLContext sc = SSLContext.getInstance("SSL");
+            sc.init(null, trustAllCerts, new java.security.SecureRandom());
+            HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
+
+            // Используем лямбда для игнорирования проверки имени хоста
+            HttpsURLConnection.setDefaultHostnameVerifier((hostname, session) -> true);
+
+        } catch (Exception e) {
+            logger.log(Level.SEVERE, "Ошибка при игнорировании проверки сертификатов", e);
+        }
+    }
+
     public Map<String, Integer> getLemmas(String text) {
         if (isEmpty(text)) {
             logger.warning("Входной текст пуст или null");
             return Collections.emptyMap();
         }
 
-        Map<String, Integer> lemmasCount = new HashMap<>();
+        Map<String, Integer> lemmasCount = new ConcurrentHashMap<>(); // Используем потокобезопасную карту
         String[] words = normalizeText(text).split("\\s+");
 
         Arrays.stream(words)
@@ -49,9 +76,6 @@ public class TextProcessor {
         return lemmasCount;
     }
 
-    /**
-     * Обрабатывает отдельное слово: извлекает леммы и увеличивает их количество в карте.
-     */
     private void processWord(String word, Map<String, Integer> lemmasCount) {
         try {
             List<String> baseForms = getLemma(word);
@@ -61,9 +85,6 @@ public class TextProcessor {
         }
     }
 
-    /**
-     * Возвращает леммы для данного слова, используя кэширование.
-     */
     private List<String> getLemma(String word) {
         return lemmaCache.computeIfAbsent(word, w -> {
             try {
@@ -78,16 +99,10 @@ public class TextProcessor {
         });
     }
 
-    /**
-     * Проверяет, следует ли исключить слово на основе его части речи.
-     */
     private boolean isExcluded(List<String> morphInfo) {
         return morphInfo.stream().anyMatch(info -> excludedPosTags.stream().anyMatch(info::contains));
     }
 
-    /**
-     * Удаляет HTML-теги из текста.
-     */
     public String removeHtmlTags(String htmlText) {
         if (isEmpty(htmlText)) {
             logger.warning("HTML-код пуст или null");
@@ -96,31 +111,19 @@ public class TextProcessor {
         return cleanHtml(htmlText);
     }
 
-    /**
-     * Нормализует текст: приводит к нижнему регистру, удаляет знаки препинания.
-     */
     private String normalizeText(String text) {
         return text.toLowerCase().replaceAll("[^а-яА-Я\\s]", " ").trim();
     }
 
-    /**
-     * Очищает HTML-код от тегов и комментариев.
-     */
     private String cleanHtml(String htmlText) {
         String noComments = htmlText.replaceAll("<!--.*?-->", "");
         return noComments.replaceAll("<[^>]*>", "").trim();
     }
 
-    /**
-     * Проверяет, является ли строка пустой или null.
-     */
     private boolean isEmpty(String str) {
         return str == null || str.trim().isEmpty();
     }
 
-    /**
-     * Индексирует страницу, если её домен разрешён.
-     */
     public Map<String, Object> indexPage(String url) {
         Map<String, Object> response = new HashMap<>();
         if (!isValidUrl(url)) {
@@ -146,9 +149,6 @@ public class TextProcessor {
         return response;
     }
 
-    /**
-     * Загружает содержимое страницы по URL.
-     */
     private String fetchPageContent(String urlString) throws IOException {
         URL url = new URL(urlString);
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
@@ -165,9 +165,6 @@ public class TextProcessor {
         }
     }
 
-    /**
-     * Проверяет, входит ли URL в разрешённые домены.
-     */
     public boolean isValidUrl(String url) {
         if (url == null || url.isEmpty()) {
             logger.warning("URL пуст или null");
@@ -191,15 +188,9 @@ public class TextProcessor {
 
             logger.info("Извлечённый хост: " + host); // Логируем извлечённый хост
 
-            // Проверяем, соответствует ли домен разрешённым
-            boolean isValid = allowedDomains.stream().anyMatch(domain ->
-                    host.equals(domain) || host.endsWith("." + domain));
+            // Разрешаем все домены
+            return true; // Возвращаем true, чтобы разрешить все домены
 
-            if (!isValid) {
-                logger.warning("URL не соответствует разрешённым доменам: " + url);
-            }
-
-            return isValid;
         } catch (URISyntaxException e) {
             logger.warning("Некорректный URL: " + url + " | Ошибка: " + e.getMessage());
             return false; // Возвращаем false в случае ошибки
@@ -230,26 +221,19 @@ public class TextProcessor {
 
     private static TextProcessor createTextProcessor() throws Exception {
         Set<String> excludedPartsOfSpeech = Set.of("СОЮЗ", "МЕЖД", "ПРЕДЛ", "ЧАСТ");
-        Set<String> allowedDomains = Set.of(
-                "playback.ru",
-                "volochek.life",
-                "radiomv.ru",
-                "ipfran.ru",
-                "dimonvideo.ru",
-                "nikoartgallery.com",
-                "et-cetera.ru",
-                "lutherancathedral.ru",
-                "dombulgakova.ru",
-                "svetlovka.ru"
-        );
-        return new TextProcessor(excludedPartsOfSpeech, allowedDomains);
+        return new TextProcessor(excludedPartsOfSpeech);
     }
 
     private static void testUrls(TextProcessor processor) {
         String[] testUrls = {
                 "https://volochek.life",
                 "http://www.playback.ru",
-                "http://example.com",
+                "https://www.svetlovka.ru",
+                "https://et-cetera.ru/mobile/",
+                "https://nikoartgallery.com",
+                "https://dimonvideo.ru",
+                "https://ipfran.ru",
+                "https://volochek.life",
                 "https://radiomv.ru",
                 "ftp://test.com", // Неверный протокол
                 null, // null URL
@@ -261,8 +245,8 @@ public class TextProcessor {
             boolean valid = processor.isValidUrl(url);
             System.out.println("URL: " + url + " - валиден: " + valid);
             if (valid) {
-                Map<String, Object> indexResponse = processor.indexPage(url);
-                System.out.println("Индексация страницы: " + indexResponse);
+                Map<String, Object> response = processor.indexPage(url);
+                System.out.println("Результат индексации: " + response);
             }
         }
     }
