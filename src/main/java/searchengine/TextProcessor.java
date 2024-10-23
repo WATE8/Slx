@@ -1,25 +1,16 @@
 package searchengine;
 
-import org.apache.lucene.analysis.standard.StandardAnalyzer;
-import org.apache.lucene.document.Document;
-import org.apache.lucene.document.StringField;
-import org.apache.lucene.index.IndexWriter;
-import org.apache.lucene.index.IndexWriterConfig;
 import org.apache.lucene.morphology.LuceneMorphology;
 import org.apache.lucene.morphology.russian.RussianLuceneMorphology;
-import org.apache.lucene.store.Directory;
-import org.apache.lucene.store.FSDirectory;
 import org.springframework.stereotype.Component;
 
 import javax.net.ssl.*;
+import java.security.cert.X509Certificate;
 import java.io.IOException;
 import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URL;
 import java.net.URISyntaxException;
-import java.nio.file.Path;
-import java.nio.file.Paths;
-import java.security.cert.X509Certificate;
 import java.util.*;
 import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
@@ -32,8 +23,6 @@ public class TextProcessor {
     private final LuceneMorphology luceneMorph;
     private final Set<String> excludedPosTags;
     private final Map<String, List<String>> lemmaCache = new ConcurrentHashMap<>();
-    private final Directory indexDirectory;
-    private final IndexWriter indexWriter;
 
     public TextProcessor(Set<String> excludedPosTags) throws Exception {
         // Инициализация морфологии
@@ -42,12 +31,6 @@ public class TextProcessor {
 
         // Игнорировать проверки сертификатов
         disableCertificateValidation();
-
-        // Настройка индекса
-        Path indexPath = Paths.get("index"); // Укажите путь к директории для индекса
-        indexDirectory = FSDirectory.open(indexPath); // Используем FSDirectory вместо RAMDirectory
-        IndexWriterConfig config = new IndexWriterConfig(new StandardAnalyzer());
-        this.indexWriter = new IndexWriter(indexDirectory, config);
     }
 
     private void disableCertificateValidation() {
@@ -67,6 +50,8 @@ public class TextProcessor {
             SSLContext sc = SSLContext.getInstance("SSL");
             sc.init(null, trustAllCerts, new java.security.SecureRandom());
             HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
+
+            // Используем лямбда для игнорирования проверки имени хоста
             HttpsURLConnection.setDefaultHostnameVerifier((hostname, session) -> true);
 
         } catch (Exception e) {
@@ -80,7 +65,7 @@ public class TextProcessor {
             return Collections.emptyMap();
         }
 
-        Map<String, Integer> lemmasCount = new ConcurrentHashMap<>();
+        Map<String, Integer> lemmasCount = new ConcurrentHashMap<>(); // Используем потокобезопасную карту
         String[] words = normalizeText(text).split("\\s+");
 
         Arrays.stream(words)
@@ -151,8 +136,7 @@ public class TextProcessor {
             String pageContent = fetchPageContent(url);
             Map<String, Integer> lemmasCount = getLemmas(pageContent);
 
-            // Индексация лемм
-            indexLemmas(url, lemmasCount);
+            // Здесь вы можете добавить код для сохранения лемм в индекс
 
             response.put("result", true);
             response.put("lemmasCount", lemmasCount);
@@ -165,39 +149,26 @@ public class TextProcessor {
         return response;
     }
 
-    private void indexLemmas(String url, Map<String, Integer> lemmasCount) {
-        try {
-            Document doc = new Document();
-            doc.add(new StringField("url", url, StringField.Store.YES));
-
-            for (Map.Entry<String, Integer> entry : lemmasCount.entrySet()) {
-                String lemma = entry.getKey();
-                Integer count = entry.getValue();
-
-                // Добавляем лемму и ее количество
-                doc.add(new StringField("lemma_" + lemma, count.toString(), StringField.Store.YES));
-            }
-
-            indexWriter.addDocument(doc);
-            indexWriter.commit(); // Сохраняем изменения
-        } catch (IOException e) {
-            logger.log(Level.SEVERE, "Ошибка при индексации лемм для URL: " + url, e);
-        }
-    }
-
     private String fetchPageContent(String urlString) throws IOException {
         URL url = new URL(urlString);
         HttpURLConnection connection = (HttpURLConnection) url.openConnection();
         connection.setRequestMethod("GET");
+        connection.setInstanceFollowRedirects(false); // Отключаем автоматические перенаправления
         connection.connect();
 
-        if (connection.getResponseCode() != 200) {
-            throw new IOException("Ошибка при получении страницы, код ответа: " + connection.getResponseCode());
-        }
-
-        try (Scanner scanner = new Scanner(connection.getInputStream())) {
-            scanner.useDelimiter("\\A"); // Считываем весь контент
-            return scanner.hasNext() ? scanner.next() : "";
+        int responseCode = connection.getResponseCode();
+        if (responseCode == HttpURLConnection.HTTP_OK) {
+            // Если ответ 200 OK, считываем содержимое
+            try (Scanner scanner = new Scanner(connection.getInputStream())) {
+                scanner.useDelimiter("\\A");
+                return scanner.hasNext() ? scanner.next() : "";
+            }
+        } else if (responseCode == HttpURLConnection.HTTP_MOVED_PERM || responseCode == HttpURLConnection.HTTP_MOVED_TEMP) {
+            // Если ответ 301 или 302, извлекаем новый URL из заголовка Location
+            String newUrl = connection.getHeaderField("Location");
+            return fetchPageContent(newUrl); // Рекурсивно вызываем метод с новым URL
+        } else {
+            throw new IOException("Ошибка при получении страницы, код ответа: " + responseCode);
         }
     }
 
@@ -240,17 +211,12 @@ public class TextProcessor {
             // Пример текста для обработки
             String text = "Это пример текста, который нужно обработать и лемматизировать.";
             Map<String, Integer> lemmas = processor.getLemmas(text);
-            System.out.println("Леммы: " + lemmas);
+            lemmas.forEach((k, v) -> System.out.println("Лемма: " + k + " -> Количество: " + v));
 
-            // Пример удаления HTML-тегов
-            String htmlText = "<html><body><h1>Заголовок</h1><p>Пример текста.</p></body></html>";
+            // Пример HTML-кода для очистки
+            String htmlText = "<html><body><h1>Заголовок</h1><p>Это параграф текста.</p><!-- комментарий --></body></html>";
             String cleanedText = processor.removeHtmlTags(htmlText);
             System.out.println("Текст без HTML-тегов: " + cleanedText);
-
-            // Индексация страницы
-            String urlToIndex = "https://volochek.life";
-            Map<String, Object> indexResponse = processor.indexPage(urlToIndex);
-            System.out.println("Индексация: " + indexResponse);
 
             // Примеры тестирования URL
             testUrls(processor);
@@ -270,21 +236,16 @@ public class TextProcessor {
                 "https://volochek.life",
                 "http://www.playback.ru",
                 "https://www.svetlovka.ru",
-                "https://et-cetera.ru/mobile/",
-                "https://nikoartgallery.com",
                 "https://dimonvideo.ru",
                 "https://ipfran.ru",
-                "https://volochek.life",
-                "https://radiomv.ru",
-                "https://test.ru", // Неверный протокол
-                null, // null URL
-                "", // Пустая строка
-                "https://dimonvideo.ru" // Корректный домен
+                "https://nikoartgallery.com",
+                "https://et-cetera.ru/mobile/",
+                "http://radiomv.ru"
         };
 
         for (String url : testUrls) {
-            boolean valid = processor.isValidUrl(url);
-            System.out.println("URL: " + url + " | Валиден: " + valid);
+            Map<String, Object> result = processor.indexPage(url);
+            System.out.println("Результат индексации для " + url + ": " + result);
         }
     }
 }

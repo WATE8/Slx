@@ -30,8 +30,6 @@ indexing-settings:
       name: "Niko Art Gallery"
     - url: "https://et-cetera.ru/mobile/"
       name: "Et Cetera Mobile"
-    - url: "https://www.lutherancathedral.ru"
-      name: "Lutheran Cathedral"
     - url: "https://dombulgakova.ru"
       name: "Dom Bulgakova"
     - url: "https://www.svetlovka.ru"
