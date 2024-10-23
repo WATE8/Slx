@@ -28,11 +28,11 @@ public class ApiController {
     }
 
     @PostMapping("/indexPage")
-    public ResponseEntity<Map<String, Object>> indexPage(@RequestParam String url) {
+    public ResponseEntity<Map<String, Object>> indexPage(@RequestParam String url, @RequestParam int siteId) {
         Map<String, Object> response = new HashMap<>();
 
         if (textProcessor.isValidUrl(url)) {
-            Map<String, Object> indexResponse = textProcessor.indexPage(url);
+            Map<String, Object> indexResponse = textProcessor.indexPage(url, siteId);
 
             if ((boolean) indexResponse.get("result")) {
                 response.put("result", true);

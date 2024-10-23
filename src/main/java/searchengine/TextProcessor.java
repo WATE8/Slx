@@ -1,7 +1,5 @@
 package searchengine;
 
-import org.apache.lucene.morphology.LuceneMorphology;
-import org.apache.lucene.morphology.russian.RussianLuceneMorphology;
 import org.springframework.stereotype.Component;
 
 import javax.net.ssl.*;
@@ -11,8 +9,11 @@ import java.net.HttpURLConnection;
 import java.net.URI;
 import java.net.URL;
 import java.net.URISyntaxException;
+import java.sql.Connection;
+import java.sql.DriverManager;
+import java.sql.PreparedStatement;
+import java.sql.SQLException;
 import java.util.*;
-import java.util.concurrent.ConcurrentHashMap;
 import java.util.logging.Level;
 import java.util.logging.Logger;
 
@@ -20,16 +21,15 @@ import java.util.logging.Logger;
 public class TextProcessor {
 
     private static final Logger logger = Logger.getLogger(TextProcessor.class.getName());
-    private final LuceneMorphology luceneMorph;
-    private final Set<String> excludedPosTags;
-    private final Map<String, List<String>> lemmaCache = new ConcurrentHashMap<>();
+    private final LemmaExtractor lemmaExtractor;
+
+    // URL для подключения к базе данных
+    private static final String DB_URL = "jdbc:mysql://localhost:3306/search_engine";
+    private static final String DB_USER = "root";
+    private static final String DB_PASSWORD = "asuzncmi666";
 
     public TextProcessor(Set<String> excludedPosTags) throws Exception {
-        // Инициализация морфологии
-        this.luceneMorph = new RussianLuceneMorphology();
-        this.excludedPosTags = excludedPosTags != null ? excludedPosTags : Set.of("СОЮЗ", "МЕЖД", "ПРЕДЛ", "ЧАСТ");
-
-        // Игнорировать проверки сертификатов
+        this.lemmaExtractor = new LemmaExtractor(excludedPosTags);
         disableCertificateValidation();
     }
 
@@ -50,57 +50,10 @@ public class TextProcessor {
             SSLContext sc = SSLContext.getInstance("SSL");
             sc.init(null, trustAllCerts, new java.security.SecureRandom());
             HttpsURLConnection.setDefaultSSLSocketFactory(sc.getSocketFactory());
-
-            // Используем лямбда для игнорирования проверки имени хоста
             HttpsURLConnection.setDefaultHostnameVerifier((hostname, session) -> true);
-
         } catch (Exception e) {
             logger.log(Level.SEVERE, "Ошибка при игнорировании проверки сертификатов", e);
         }
-    }
-
-    public Map<String, Integer> getLemmas(String text) {
-        if (isEmpty(text)) {
-            logger.warning("Входной текст пуст или null");
-            return Collections.emptyMap();
-        }
-
-        Map<String, Integer> lemmasCount = new ConcurrentHashMap<>(); // Используем потокобезопасную карту
-        String[] words = normalizeText(text).split("\\s+");
-
-        Arrays.stream(words)
-                .parallel()
-                .filter(word -> !word.isEmpty())
-                .forEach(word -> processWord(word, lemmasCount));
-
-        return lemmasCount;
-    }
-
-    private void processWord(String word, Map<String, Integer> lemmasCount) {
-        try {
-            List<String> baseForms = getLemma(word);
-            baseForms.forEach(baseForm -> lemmasCount.merge(baseForm, 1, Integer::sum));
-        } catch (Exception e) {
-            logger.log(Level.SEVERE, "Ошибка при обработке слова: " + word, e);
-        }
-    }
-
-    private List<String> getLemma(String word) {
-        return lemmaCache.computeIfAbsent(word, w -> {
-            try {
-                List<String> morphInfo = luceneMorph.getMorphInfo(w);
-                if (!isExcluded(morphInfo)) {
-                    return luceneMorph.getNormalForms(w);
-                }
-            } catch (Exception e) {
-                logger.log(Level.SEVERE, "Ошибка при получении морфологической информации для слова: " + w, e);
-            }
-            return Collections.emptyList();
-        });
-    }
-
-    private boolean isExcluded(List<String> morphInfo) {
-        return morphInfo.stream().anyMatch(info -> excludedPosTags.stream().anyMatch(info::contains));
     }
 
     public String removeHtmlTags(String htmlText) {
@@ -109,10 +62,6 @@ public class TextProcessor {
             return "";
         }
         return cleanHtml(htmlText);
-    }
-
-    private String normalizeText(String text) {
-        return text.toLowerCase().replaceAll("[^а-яА-Я\\s]", " ").trim();
     }
 
     private String cleanHtml(String htmlText) {
@@ -124,7 +73,7 @@ public class TextProcessor {
         return str == null || str.trim().isEmpty();
     }
 
-    public Map<String, Object> indexPage(String url) {
+    public Map<String, Object> indexPage(String url, int siteId) {
         Map<String, Object> response = new HashMap<>();
         if (!isValidUrl(url)) {
             response.put("result", false);
@@ -134,9 +83,11 @@ public class TextProcessor {
 
         try {
             String pageContent = fetchPageContent(url);
-            Map<String, Integer> lemmasCount = getLemmas(pageContent);
+            String cleanedContent = removeHtmlTags(pageContent); // Очистка HTML-тегов
+            Map<String, Integer> lemmasCount = lemmaExtractor.getLemmas(cleanedContent); // Лемматизация очищенного текста
 
-            // Здесь вы можете добавить код для сохранения лемм в индекс
+            // Сохранение лемм в базу данных
+            saveLemmasToDatabase(lemmasCount, siteId);
 
             response.put("result", true);
             response.put("lemmasCount", lemmasCount);
@@ -144,9 +95,32 @@ public class TextProcessor {
             logger.log(Level.SEVERE, "Ошибка при загрузке содержимого страницы: " + url, e);
             response.put("result", false);
             response.put("error", "Не удалось загрузить содержимое страницы");
+        } catch (SQLException e) {
+            logger.log(Level.SEVERE, "Ошибка при сохранении лемм в базу данных для URL: " + url, e);
+            response.put("result", false);
+            response.put("error", "Ошибка при сохранении лемм в базу данных");
         }
 
         return response;
+    }
+
+    private void saveLemmasToDatabase(Map<String, Integer> lemmasCount, int siteId) throws SQLException {
+        try (Connection connection = DriverManager.getConnection(DB_URL, DB_USER, DB_PASSWORD)) {
+            String insertQuery = "INSERT INTO lemmas (lemma, lemma_count, site_id) VALUES (?, ?, ?)";
+
+            try (PreparedStatement preparedStatement = connection.prepareStatement(insertQuery)) {
+                for (Map.Entry<String, Integer> entry : lemmasCount.entrySet()) {
+                    preparedStatement.setString(1, entry.getKey());
+                    preparedStatement.setInt(2, entry.getValue());
+                    preparedStatement.setInt(3, siteId); // Указываем site_id
+                    preparedStatement.addBatch();
+                }
+                preparedStatement.executeBatch(); // Выполнение пакетной вставки
+            }
+        } catch (SQLException e) { // Обработка SQLException
+            logger.log(Level.SEVERE, "Ошибка при сохранении лемм в базу данных", e);
+            throw e; // Перебрасываем исключение для дальнейшей обработки, если необходимо
+        }
     }
 
     private String fetchPageContent(String urlString) throws IOException {
@@ -206,46 +180,29 @@ public class TextProcessor {
 
     public static void main(String[] args) {
         try {
-            TextProcessor processor = createTextProcessor();
+            TextProcessor processor = new TextProcessor(Set.of("СОЮЗ", "МЕЖД", "ПРЕДЛ", "ЧАСТ"));
 
-            // Пример текста для обработки
-            String text = "Это пример текста, который нужно обработать и лемматизировать.";
-            Map<String, Integer> lemmas = processor.getLemmas(text);
-            lemmas.forEach((k, v) -> System.out.println("Лемма: " + k + " -> Количество: " + v));
+            // Пример siteId для индексации
+            int siteId = 1; // Убедитесь, что этот ID соответствует вашему сайту в базе данных
 
-            // Пример HTML-кода для очистки
-            String htmlText = "<html><body><h1>Заголовок</h1><p>Это параграф текста.</p><!-- комментарий --></body></html>";
-            String cleanedText = processor.removeHtmlTags(htmlText);
-            System.out.println("Текст без HTML-тегов: " + cleanedText);
+            // Добавление новых URL для индексации
+            String[] testUrls = {
+                    "https://volochek.life",
+                    "http://radiomv.ru",
+                    "http://www.playback.ru",
+                    "https://ipfran.ru",
+                    "https://dimonvideo.ru",
+                    "https://nikoartgallery.com",
+                    "https://www.svetlovka.ru"
+            };
 
-            // Примеры тестирования URL
-            testUrls(processor);
+            for (String url : testUrls) {
+                Map<String, Object> result = processor.indexPage(url, siteId);
+                System.out.println("Результат индексации для " + url + ": " + result);
+            }
 
         } catch (Exception e) {
             logger.log(Level.SEVERE, "Ошибка инициализации TextProcessor", e);
-        }
-    }
-
-    private static TextProcessor createTextProcessor() throws Exception {
-        Set<String> excludedPartsOfSpeech = Set.of("СОЮЗ", "МЕЖД", "ПРЕДЛ", "ЧАСТ");
-        return new TextProcessor(excludedPartsOfSpeech);
-    }
-
-    private static void testUrls(TextProcessor processor) {
-        String[] testUrls = {
-                "https://volochek.life",
-                "http://www.playback.ru",
-                "https://www.svetlovka.ru",
-                "https://et-cetera.ru/mobile/",
-                "https://nikoartgallery.com",
-                "https://ipfran.ru",
-                "https://dimonvideo.ru",
-                "http://radiomv.ru"
-        };
-
-        for (String url : testUrls) {
-            Map<String, Object> result = processor.indexPage(url);
-            System.out.println("Результат индексации для " + url + ": " + result);
         }
     }
 }
