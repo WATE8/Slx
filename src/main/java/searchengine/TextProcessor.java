@@ -235,7 +235,7 @@ public class TextProcessor {
                 "https://ipfran.ru",
                 "https://volochek.life",
                 "https://radiomv.ru",
-                "ftp://test.com", // Неверный протокол
+                "https://test.ru", // Неверный протокол
                 null, // null URL
                 "", // Пустая строка
                 "https://dimonvideo.ru" // Корректный домен
@@ -243,11 +243,7 @@ public class TextProcessor {
 
         for (String url : testUrls) {
             boolean valid = processor.isValidUrl(url);
-            System.out.println("URL: " + url + " - валиден: " + valid);
-            if (valid) {
-                Map<String, Object> response = processor.indexPage(url);
-                System.out.println("Результат индексации: " + response);
-            }
+            System.out.println("URL: " + url + " | Валиден: " + valid);
         }
     }
 }
