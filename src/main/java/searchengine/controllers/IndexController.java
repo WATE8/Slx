@@ -1,7 +1,10 @@
 package searchengine.controllers;
 
 import searchengine.model.Index;
+import searchengine.model.Lemma;
+import searchengine.model.Page;
 import searchengine.services.IndexService;
+import lombok.Data; // Не забудьте импортировать Lombok @Data
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -16,7 +19,11 @@ public class IndexController {
     private IndexService indexService;
 
     @PostMapping
-    public ResponseEntity<Index> saveIndex(@RequestBody Index index) {
+    public ResponseEntity<Index> saveIndex(@RequestBody CreateIndexRequest request) {
+        Page page = request.getPage();
+        Lemma lemma = request.getLemma();
+        float rank = request.getRank();
+        Index index = new Index(page, lemma, rank);
         Index savedIndex = indexService.saveIndex(index);
         return ResponseEntity.ok(savedIndex);
     }
@@ -37,5 +44,12 @@ public class IndexController {
     public ResponseEntity<Void> deleteIndex(@PathVariable int id) {
         indexService.deleteIndex(id);
         return ResponseEntity.noContent().build();
+    }
+
+    @Data
+    public static class CreateIndexRequest {
+        private Page page;
+        private Lemma lemma;
+        private float rank;
     }
 }

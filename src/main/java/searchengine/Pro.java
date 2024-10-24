@@ -31,7 +31,7 @@ public class Pro {
     @Autowired
     private SiteRepository siteRepository;
 
-    private RussianMorphology morphology;
+    private final RussianMorphology morphology;
 
     public Pro() throws Exception {
         this.morphology = new RussianMorphology();
@@ -48,15 +48,8 @@ public class Pro {
         // 3. Выполняем лемматизацию текста и получаем частотный словарь
         Map<String, Integer> lemmaCountMap = extractLemmas(text);
 
-        // Получаем код статуса страницы
-        int code = 200; // Вы можете настроить получение статуса кода
-
         // 4. Сохраняем страницу в таблицу page
-        Page page = new Page();
-        page.setSite(siteRepository.findById(siteId).orElseThrow());
-        page.setPath(url); // Установите путь, если это необходимо
-        page.setCode(code); // Устанавливаем код
-        page.setContent(html); // Устанавливаем контент
+        Page page = new Page(siteRepository.findById(siteId).orElseThrow(), url, 200, html);
         pageRepository.save(page);
 
         // 5. Обрабатываем каждую лемму
@@ -77,10 +70,10 @@ public class Pro {
             }
             lemmaRepository.save(lemma);
 
-            // Добавляем связь между страницей и леммой в таблицу index
+            // Создаем запись в таблице index (индексация)
             Index index = new Index();
-            index.setPage(page); // Устанавливаем объект страницы
-            index.setLemma(lemma); // Устанавливаем объект леммы
+            index.setPage(page); // Устанавливаем объект Page
+            index.setLemma(lemma); // Устанавливаем объект Lemma
             index.setRank(count);
             indexRepository.save(index);
         }
