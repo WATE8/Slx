@@ -4,7 +4,7 @@ import searchengine.model.Index;
 import searchengine.model.Lemma;
 import searchengine.model.Page;
 import searchengine.services.IndexService;
-import lombok.Data; // Не забудьте импортировать Lombok @Data
+import lombok.Data;
 import org.springframework.beans.factory.annotation.Autowired;
 import org.springframework.http.ResponseEntity;
 import org.springframework.web.bind.annotation.*;
@@ -23,8 +23,9 @@ public class IndexController {
         Page page = request.getPage();
         Lemma lemma = request.getLemma();
         float rank = request.getRank();
-        Index index = new Index(page, lemma, rank);
-        Index savedIndex = indexService.saveIndex(index);
+
+        // Используйте метод createAndSaveIndex
+        Index savedIndex = indexService.createAndSaveIndex(page, lemma, rank);
         return ResponseEntity.ok(savedIndex);
     }
 
