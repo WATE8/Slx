@@ -1,10 +1,8 @@
 package searchengine.repository;
 
-import searchengine.model.Lemma;
 import org.springframework.data.jpa.repository.JpaRepository;
-import org.springframework.stereotype.Repository;
+import searchengine.model.Lemma;
 
-@Repository
 public interface LemmaRepository extends JpaRepository<Lemma, Integer> {
-    // Могут быть добавлены методы для поиска по полям
+    Lemma findByLemma(String lemma);
 }
